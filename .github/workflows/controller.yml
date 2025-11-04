@@ -1,0 +1,61 @@
+name: Controller Auto
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-controller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 hours
+
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+      CONTROLLER_HOST: 0.0.0.0
+      CONTROLLER_PORT: 4945
+
+    steps:
+      - name: Login to Docker Hub
+        run: |
+          echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Pull latest controller image
+        run: |
+          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto"
+          echo "Pulling $IMAGE"
+          docker pull $IMAGE
+
+      - name: Start controller container
+        run: |
+          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto"
+          docker run -d --name=kali_controller --privileged --network=host $IMAGE tail -f /dev/null
+
+      - name: Launch Controller App
+        run: |
+          docker exec kali_controller bash -c "tmux new -d -s control_panel 'python3 /app/controller/run_controller.py'"
+
+      - name: Keep Alive & Auto-Restart
+        run: |
+          set -e
+          start_time=$(date +%s)
+          max_runtime=$((5 * 3600 + 1800)) # 5h30m
+
+          while true; do
+            now=$(date +%s)
+            uptime=$((now - start_time))
+            echo "Uptime: $((uptime/60)) min"
+            if [ "$uptime" -ge "$max_runtime" ]; then
+              echo "Auto-restarting workflow..."
+              docker commit kali_controller ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
+              docker push ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
+              sleep 5
+              curl -s -o /dev/null -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/controller.yml/dispatches \
+                -d '{"ref":"main"}'
+              exit 0
+            fi
+            sleep 60
+          done
