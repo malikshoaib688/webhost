@@ -1,0 +1,54 @@
+name: Bot Auto
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 hours
+
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      CONTROLLER_HOST: 0.0.0.0
+      CONTROLLER_PORT: 4945
+
+    steps:
+      - name: Pull latest bot image
+        run: |
+          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:botv1"
+          echo "Pulling $IMAGE"
+          docker pull $IMAGE
+
+      - name: Start bot container
+        run: |
+          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:botv1"
+          docker run -d --name=kali_bot --privileged --network=host $IMAGE tail -f /dev/null
+
+      - name: Launch Bot App
+        run: |
+          docker exec kali_bot bash -c "tmux new -d -s bot 'python3 /app/controller/worker/worker.py --host ${CONTROLLER_HOST} --port ${CONTROLLER_PORT}'"
+
+      - name: Keep Alive & Auto-Restart
+        run: |
+          set -e
+          start_time=$(date +%s)
+          max_runtime=$((5 * 3600 + 1800)) # 5h30m
+
+          while true; do
+            now=$(date +%s)
+            uptime=$((now - start_time))
+            echo "Uptime: $((uptime/60)) min"
+            if [ "$uptime" -ge "$max_runtime" ]; then
+              echo "Auto-restarting workflow..."
+              sleep 5
+              curl -s -o /dev/null -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
+                -d '{"ref":"main"}'
+              exit 0
+            fi
+            sleep 60
+          done
