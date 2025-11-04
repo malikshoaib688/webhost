@@ -1,4 +1,4 @@
-name: Controller Auto
+name: Controller Auto Session
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   run-controller:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6 hours
+    timeout-minutes: 360
 
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -16,45 +16,59 @@ jobs:
       CONTROLLER_PORT: 4945
 
     steps:
-      - name: Login to Docker Hub
-        run: |
-          echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-
       - name: Pull latest controller image
         run: |
-          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto"
-          echo "Pulling $IMAGE"
-          docker pull $IMAGE
+          IMAGE_NAME="${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto"
+          echo "Pulling $IMAGE_NAME..."
+          docker pull "$IMAGE_NAME"
 
-      - name: Start controller container
+      - name: Start container
         run: |
-          IMAGE="${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto"
-          docker run -d --name=kali_controller --privileged --network=host $IMAGE tail -f /dev/null
+          docker rm -f kali_controller || true
+          docker run -d --name=kali_controller \
+            --privileged --network=host \
+            "$IMAGE_NAME" tail -f /dev/null
+          sleep 5  # ensure container is up
 
-      - name: Launch Controller App
+      - name: Install tmux inside container (if not present)
         run: |
-          docker exec kali_controller bash -c "tmux new -d -s control_panel 'python3 /app/controller/run_controller.py'"
+          docker exec kali_controller apt-get update -y
+          docker exec kali_controller apt-get install -y tmux python3 python3-pip
 
-      - name: Keep Alive & Auto-Restart
+      - name: Make start.sh executable
+        run: |
+          docker exec kali_controller chmod +x /start.sh
+
+      - name: Start controller in tmux
+        run: |
+          docker exec -d kali_controller tmux new -s control_panel bash -c "/start.sh; exec bash"
+          sleep 3
+          # start controller inside tmux
+          docker exec -d kali_controller tmux send-keys -t control_panel "python3 /root/app/controller/run_controller.py" C-m
+
+      - name: Show tmux sessions
+        run: |
+          docker exec kali_controller tmux ls || echo "No tmux sessions found"
+
+      - name: Keep workflow alive & auto-restart
         run: |
           set -e
           start_time=$(date +%s)
-          max_runtime=$((5 * 3600 + 1800)) # 5h30m
-
+          max_runtime=$((5*60*60 + 30*60)) # 5h 30m
           while true; do
             now=$(date +%s)
             uptime=$((now - start_time))
-            echo "Uptime: $((uptime/60)) min"
+            echo "[$(date)] Uptime: $((uptime/60)) min"
             if [ "$uptime" -ge "$max_runtime" ]; then
-              echo "Auto-restarting workflow..."
-              docker commit kali_controller ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
-              docker push ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
-              sleep 5
-              curl -s -o /dev/null -X POST \
+              echo "[$(date)] Auto-restarting workflow..."
+              docker commit kali_controller ${{ secrets.DOCKERHUB_USERNAME }}/kali_botnet:controllerAuto
+              docker push ${{ secrets.DOCKERHUB_USERNAME }}/kali_botnet:controllerAuto
+              curl -s -X POST \
                 -H "Accept: application/vnd.github+json" \
                 -H "Authorization: Bearer $GH_TOKEN" \
                 https://api.github.com/repos/${{ github.repository }}/actions/workflows/controller.yml/dispatches \
                 -d '{"ref":"main"}'
+              echo "Exiting current workflow..."
               exit 0
             fi
             sleep 60
