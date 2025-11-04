@@ -47,11 +47,11 @@ jobs:
       - name: Start Controller Services
         run: |
           set -x
+          sleep 10
           docker exec kali_controller bash /start.sh &
-          sleep 2
-          docker exec kali_controller tmux new -d -s control_panel "python3 /app/controller/run_controller.py"
+          docker exec kali_controller tmux new -d -s control_panel "sudo /usr/bin/python3 /app/controller/run_controller.py"
           docker exec kali_controller tmux ls
-
+          
       - name: Start detached tmate session
         run: |
           set -e
