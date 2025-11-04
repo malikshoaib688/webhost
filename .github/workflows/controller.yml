@@ -29,12 +29,7 @@ jobs:
           set -x
           IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
           docker pull $IMAGE_NAME
-
-      - name: Remove Old Container
-        run: |
-          set -x
-          docker rm -f kali_controller || true
-
+          
       - name: Run Controller Container
         run: |
           set -x
