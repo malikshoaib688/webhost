@@ -11,8 +11,8 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      CONTROLLER_HOST: 0.0.0.0
-      CONTROLLER_PORT: 4945
+      CONTROLLER_HOST: 147.185.221.212
+      CONTROLLER_PORT: 2472
 
     steps:
       - name: Pull latest bot image
