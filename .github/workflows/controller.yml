@@ -41,13 +41,13 @@ jobs:
             -e CONTROLLER_PORT=$CONTROLLER_PORT \
             $IMAGE_NAME \
             tail -f /dev/null
-          sleep 5
+          sleep 2
           docker ps -a
 
       - name: Start Controller Services
         run: |
           set -x
-          sleep 10
+          sleep 1
           docker exec kali_controller bash /start.sh &
           docker exec kali_controller tmux new -d -s control_panel "sudo /usr/bin/python3 /app/controller/run_controller.py"
           docker exec kali_controller tmux ls
