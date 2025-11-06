@@ -27,7 +27,7 @@ jobs:
       - name: Pull Bot Image
         run: |
           set -x
-          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:botv1
+          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
           docker pull $IMAGE_NAME
 
       - name: Remove Old Bot Container
@@ -38,7 +38,7 @@ jobs:
       - name: Run Bot Container
         run: |
           set -x
-          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:botv1
+          IMAGE_NAME=${DOCKERHUB_USERNAME}/kali_botnet:controllerAuto
           docker run -d --name=kali_bot \
             --privileged \
             --network=host \
